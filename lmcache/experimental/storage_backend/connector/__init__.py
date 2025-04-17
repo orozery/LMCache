@@ -29,6 +29,7 @@ from lmcache.logging import init_logger
 
 from .audit_connector import AuditConnector
 from .blackhole_connector import BlackholeConnector
+from .fs_connector import FSConnector
 from .infinistore_connector import InfinistoreConnector
 from .mooncakestore_connector import MooncakestoreConnector
 
@@ -187,6 +188,17 @@ def CreateConnector(
             real_connector = CreateConnector(real_url, loop, memory_allocator)
             return AuditConnector(real_connector=real_connector,
                                   verify_checksum=verify_checksum)
+        case "fs":
+            if num_hosts != 1:
+                raise ValueError(
+                    f"FS connector only supports a single path, but got url:"
+                    f"{url}")
+            # For fs connector path is the base path of the url
+            base_path = parsed_url.paths[0]
+            # Ensure path starts with '/'
+            if not base_path.startswith('/'):
+                base_path = '/' + base_path
+            connector = FSConnector(base_path, loop, memory_allocator)
         case _:
             raise ValueError(f"Unknown connector type {connector_type} "
                              f"(url is: {url})")
