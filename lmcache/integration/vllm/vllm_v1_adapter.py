@@ -600,7 +600,7 @@ class LMCacheConnectorV1Impl:
         for finished_req_id in scheduler_output.finished_req_ids:
             self._request_trackers.pop(finished_req_id, None)
 
-        for request in scheduler_output.scheduled_new_reqs:
+        for request in scheduler_output.new_KV_requests_to_send:
             # Right now, we only load KV for new requests
             load_spec = self.load_specs.pop(request.req_id, None)
             num_tokens_to_compute = request.num_computed_tokens + \
