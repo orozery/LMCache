@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import time
 import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
@@ -338,6 +340,16 @@ class LMCacheConnectorV1Impl:
         # TODO: need to align this chunk size with lmcache
         self._lmcache_chunk_size = 256
 
+    def is_request_done_receiving(self, request: "Request") -> bool:
+        # NOTE(rob): this is extremely brittle and will cause
+        # issues where this never returns true (causing deadlock)
+        # if e.g. we evict RECVObjPool before lookup.
+        num_external_hit_tokens = self.lookup_client.lookup(
+            torch.tensor(request.prompt_token_ids))
+        if num_external_hit_tokens > 0:
+            logger.debug(f"{num_external_hit_tokens=}")
+        return num_external_hit_tokens == len(request.prompt_token_ids)
+
     def _init_kv_caches_from_forward_context(
             self, forward_context: "ForwardContext"):
         for layer_name in forward_context.no_compile_layers:
@@ -465,6 +477,10 @@ class LMCacheConnectorV1Impl:
             save_spec = request.save_spec
             if save_spec is None or not save_spec.can_save:
                 continue
+                
+            if os.getenv("DEBUG_DELAY_SAVE", "0") == "1":
+                logger.info("Sleeping to show that the worker is blocked.")
+                time.sleep(1.)
 
             token_ids = request.token_ids
             assert isinstance(token_ids, torch.Tensor)
@@ -600,8 +616,9 @@ class LMCacheConnectorV1Impl:
         for finished_req_id in scheduler_output.finished_req_ids:
             self._request_trackers.pop(finished_req_id, None)
 
-        for request in scheduler_output.new_KV_requests_to_send:
-            # Right now, we only load KV for new requests
+        for request in scheduler_output.scheduled_new_reqs:
+            # NOTE(rob): all new reqs are added to tracker for both
+            # producer and consumer side.
             load_spec = self.load_specs.pop(request.req_id, None)
             num_tokens_to_compute = request.num_computed_tokens + \
                     scheduler_output.num_scheduled_tokens[request.req_id]
@@ -609,6 +626,10 @@ class LMCacheConnectorV1Impl:
                 request, num_tokens_to_compute)
             self._request_trackers[request.req_id] = request_tracker
 
+            # NOTE(rob): scheduled new reqs need to be loaded on
+            # the consumer side only.
+            if self.kv_role == "kv_producer":
+                continue
             req_meta = ReqMeta.from_request_tracker(
                 request_tracker,
                 self._block_size,
@@ -619,18 +640,41 @@ class LMCacheConnectorV1Impl:
             if req_meta is not None:
                 meta.add_request(req_meta)
 
-        for request in scheduler_output.scheduled_cached_reqs:
-            request_tracker = self._request_trackers[request.req_id]
-            request_tracker.update(request)
+        # NOTE(rob): producer side sends the KVs.
+        for request_id in scheduler_output.new_KV_req_ids_to_send:
+            assert self.kv_role == "kv_producer"
+            request_tracker = self._request_trackers[request_id]
 
             req_meta = ReqMeta.from_request_tracker(
                 request_tracker,
                 self._block_size,
                 self._lmcache_chunk_size,
                 load_spec=None,
-                skip_save=force_skip_save,
+                skip_save=False,
                 discard_partial_chunks=self._discard_partial_chunks)
             if req_meta is not None:
                 meta.add_request(req_meta)
+
+        # NOTE(rob): this is not needed since:
+        #   - a) we do not need to chunking (we send the KVs)
+        #           in one group after the request is done prefilling
+        #   - b) we do not need to load (on consumer side) once
+        #           we are in the decode phase
+        # NOTE(rob): this means we cannot get external blocks
+        # for resumed requests that were preempted.
+
+        # for request in scheduler_output.scheduled_cached_reqs:
+        #     request_tracker = self._request_trackers[request.req_id]
+        #     request_tracker.update(request)
+
+        #     req_meta = ReqMeta.from_request_tracker(
+        #         request_tracker,
+        #         self._block_size,
+        #         self._lmcache_chunk_size,
+        #         load_spec=None,
+        #         skip_save=force_skip_save,
+        #         discard_partial_chunks=self._discard_partial_chunks)
+        #     if req_meta is not None:
+        #         meta.add_request(req_meta)
 
         return meta
