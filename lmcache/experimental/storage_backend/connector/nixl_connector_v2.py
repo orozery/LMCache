@@ -31,7 +31,7 @@ from lmcache.experimental.memory_management import (MemoryAllocatorInterface,
 from lmcache.experimental.storage_backend.connector.nixl_connector import (
     NixlConfig, NixlRole)
 from lmcache.logging import init_logger
-from lmcache.utils import CacheEngineKey
+from lmcache.utils import CacheEngineKey, _lmcache_nvtx_annotate
 
 logger = init_logger(__name__)
 
@@ -69,7 +69,7 @@ class NixlBufferAllocator(MemoryAllocatorInterface):
 
         :rtype: Optional[MemoryObj]
         """
-        metadata = self.dry_allocate(shape, dtype, fmt)
+        metadata = self.dry_allocate(torch.Size(shape), dtype, fmt)
         metadata.address = self.allocated_size
 
         # check the size and capacity
@@ -229,6 +229,7 @@ class NixlPipe:
             self._uuid = uuid.uuid4().hex
             self.ack_receive()
 
+    @_lmcache_nvtx_annotate
     def _spin_check_for_ack(self) -> str:
         """
         Spin until receives an ack from the peer.
@@ -251,6 +252,7 @@ class NixlPipe:
 
         raise RuntimeError("Failed to receive ACK from remote peer")
 
+    @_lmcache_nvtx_annotate
     def _commit_write(self, write_size: int, uid: str):
         """A blocking function that ensures the write buffer is delivered to
         the receiver.
@@ -264,6 +266,10 @@ class NixlPipe:
         Raises:
             RuntimeError: if the transfer fails
         """
+        # Synchronize the default stream since the transfer happens in another
+        # stream
+        torch.cuda.default_stream().synchronize()
+
         # Send the data to the remote peer
         num_transfers = (write_size - 1) // NixlPipe.TRANSFER_BUFFER_SIZE + 1
         desc_indexes = list(range(num_transfers))
@@ -275,8 +281,7 @@ class NixlPipe:
                                                self._local_xfer_handlers,
                                                desc_indexes,
                                                self._remote_xfer_handlers,
-                                               desc_indexes,
-                                               notif_msg=uuid_to_message(uid))
+                                               desc_indexes)
         t2 = time.perf_counter()
 
         self._agent.transfer(handle)  #, uuid_to_message(uid))
@@ -294,6 +299,8 @@ class NixlPipe:
                     f"Failed to send data to remote peer: {self.peer_name}, "
                     f"status: {status}")
         t3 = time.perf_counter()
+
+        self._agent.send_notif(self.peer_name, uuid_to_message(uid))
 
         logger.debug(
             "Transfer %s completed in %.4f ms, creating the transfer: %.4f ms,"
@@ -322,6 +329,7 @@ class NixlPipe:
         # and may be confusing
         return self._allocator.allocate(shape, dtype, fmt)
 
+    @_lmcache_nvtx_annotate
     def flush(self):
         """Flush the buffer to the receiver side.
         Will also reset the allocator's allocated size to 0
@@ -335,6 +343,7 @@ class NixlPipe:
     ###########################
     # Receiver side functions
     ###########################
+    @_lmcache_nvtx_annotate
     def read_buffer(self,
                     metadatas: list[MemoryObjMetadata]) -> list[MemoryObj]:
         """Try read the data from the NIXL transfer buffer (receiver side).

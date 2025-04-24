@@ -27,19 +27,25 @@ class LMCacheEngineConfig:
     enable_blending: bool  # whether to enable blending
     blend_recompute_ratio: float  # the ratio of blending recompute
     blend_min_tokens: int  # the minimum number of tokens for blending
+    blend_special_str: str = " # # "  # the separator for blending
 
     # P2P related configurations
-    enable_p2p: bool  # whether to enable peer-to-peer sharing
-    lookup_url: Optional[str]  # the url of the lookup server
-    distributed_url: Optional[str]  # the url of the distributed server
+    enable_p2p: bool = False  # whether to enable peer-to-peer sharing
+    lookup_url: Optional[str] = None  # the url of the lookup server
+    distributed_url: Optional[str] = None  # the url of the distributed server
 
     # Error handling related configurations
-    error_handling: bool  # whether to enable error handling
+    error_handling: bool = False  # whether to enable error handling
 
     # Controller related configurations
     enable_controller: Optional[bool] = False  # whether to enable controller
     # the id of the lmcache instance
-    lmcache_instance_id: Optional[str] = "lmcache_default_instance"
+    lmcache_instance_id: str = "lmcache_default_instance"
+    # controller url
+    controller_url: Optional[str] = None
+    # lmcache worker url
+    # NOTE: port number will add `worker_id`
+    lmcache_worker_url: Optional[str] = None
 
     # (Optional) Nixl configurations
     # whether to enable Nixl
@@ -70,12 +76,15 @@ class LMCacheEngineConfig:
         enable_blending: bool = False,
         blend_recompute_ratio: float = 0.15,
         blend_min_tokens: int = 256,
+        blend_special_str: str = " # # ",
         enable_p2p: bool = False,
         lookup_url: Optional[str] = None,
         distributed_url: Optional[str] = None,
         error_handling: bool = False,
         enable_controller: Optional[bool] = False,
-        lmcache_instance_id: Optional[str] = "lmcache_default_instance",
+        lmcache_instance_id: str = "lmcache_default_instance",
+        controller_url: Optional[str] = None,
+        lmcache_worker_url: Optional[str] = None,
         enable_nixl: Optional[bool] = False,
         nixl_role: Optional[str] = None,
         nixl_peer_host: Optional[str] = None,
@@ -89,8 +98,9 @@ class LMCacheEngineConfig:
             chunk_size, local_cpu, max_local_cpu_size, local_disk,
             max_local_disk_size, remote_url, remote_serde, save_decode_cache,
             enable_blending, blend_recompute_ratio, blend_min_tokens,
-            enable_p2p, lookup_url, distributed_url, error_handling,
-            enable_controller, lmcache_instance_id, enable_nixl, nixl_role,
+            blend_special_str, enable_p2p, lookup_url, distributed_url,
+            error_handling, enable_controller, lmcache_instance_id,
+            controller_url, lmcache_worker_url, enable_nixl, nixl_role,
             nixl_peer_host, nixl_peer_port, nixl_buffer_size,
             nixl_buffer_device, nixl_enable_gc).validate()
 
@@ -104,6 +114,7 @@ class LMCacheEngineConfig:
         enable_blending: bool = False,
         blend_recompute_ratio: float = 0.15,
         blend_min_tokens: int = 256,
+        blend_special_str: str = " # # ",
         max_local_disk_size: float = 0.0,
         enable_p2p: bool = False,
         lookup_url: Optional[str] = None,
@@ -153,8 +164,9 @@ class LMCacheEngineConfig:
                                    local_disk, max_local_disk_size, remote_url,
                                    remote_serde, save_decode_cache,
                                    enable_blending, blend_recompute_ratio,
-                                   blend_min_tokens, enable_p2p, lookup_url,
-                                   distributed_url, error_handling).validate()
+                                   blend_min_tokens, blend_special_str,
+                                   enable_p2p, lookup_url, distributed_url,
+                                   error_handling).validate()
 
     @staticmethod
     def from_file(file_path: str) -> "LMCacheEngineConfig":
@@ -176,9 +188,11 @@ class LMCacheEngineConfig:
         remote_serde = config.get("remote_serde", "naive")
 
         save_decode_cache = config.get("save_decode_cache", False)
+
         enable_blending = config.get("enable_blending", False)
         blend_recompute_ratio = config.get("blend_recompute_ratio", 0.15)
         blend_min_tokens = config.get("blend_min_tokens", 256)
+        blend_special_str = config.get("blend_special_str", " # # ")
 
         enable_p2p = config.get("enable_p2p", False)
         lookup_url = config.get("lookup_url", None)
@@ -189,6 +203,8 @@ class LMCacheEngineConfig:
         enable_controller = config.get("enable_controller", False)
         lmcache_instance_id = config.get("lmcache_instance_id",
                                          "lmcache_default_instance")
+        controller_url = config.get("controller_url", None)
+        lmcache_worker_url = config.get("lmcache_worker_url", None)
 
         enable_nixl = config.get("enable_nixl", False)
         nixl_role = config.get("nixl_role", None)
@@ -225,12 +241,15 @@ class LMCacheEngineConfig:
             enable_blending,
             blend_recompute_ratio,
             blend_min_tokens,
+            blend_special_str,
             enable_p2p,
             lookup_url,
             distributed_url,
             error_handling,
             enable_controller,
             lmcache_instance_id,
+            controller_url,
+            lmcache_worker_url,
             enable_nixl,
             nixl_role,
             nixl_peer_host,
@@ -295,6 +314,7 @@ class LMCacheEngineConfig:
         config.save_decode_cache = to_bool(
             parse_env(get_env_name("save_decode_cache"),
                       config.save_decode_cache))
+
         config.enable_blending = to_bool(
             parse_env(get_env_name("enable_blending"), config.enable_blending))
         config.blend_recompute_ratio = to_float(
@@ -303,6 +323,10 @@ class LMCacheEngineConfig:
         config.blend_min_tokens = to_int(
             parse_env(get_env_name("blend_min_tokens"),
                       config.blend_min_tokens))
+        blend_special_str = parse_env(get_env_name("blend_special_str"),
+                                      config.blend_special_str)
+        assert blend_special_str is not None
+        config.blend_special_str = blend_special_str
 
         config.enable_p2p = to_bool(
             parse_env(get_env_name("enable_p2p"), config.enable_p2p))
@@ -317,8 +341,14 @@ class LMCacheEngineConfig:
         config.enable_controller = to_bool(
             parse_env(get_env_name("enable_controller"),
                       config.enable_controller))
-        config.lmcache_instance_id = parse_env(
-            get_env_name("lmcache_instance_id"), config.lmcache_instance_id)
+        lmcache_instance_id = parse_env(get_env_name("lmcache_instance_id"),
+                                        "lmcache_default_instance")
+        assert lmcache_instance_id is not None
+        config.lmcache_instance_id = lmcache_instance_id
+        config.controller_url = parse_env(get_env_name("controller_url"),
+                                          config.controller_url)
+        config.lmcache_worker_url = parse_env(
+            get_env_name("lmcache_worker_url"), config.lmcache_worker_url)
 
         config.enable_nixl = to_bool(
             parse_env(get_env_name("enable_nixl"), config.enable_nixl))
