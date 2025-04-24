@@ -13,8 +13,8 @@
 # limitations under the License.
 
 import os
-import time
 import threading
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
