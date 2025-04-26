@@ -107,7 +107,9 @@ class FSConnector(RemoteConnector):
 
     async def put(self, key: CacheEngineKey, memory_obj: MemoryObj):
         """Store data to file system"""
-        file_path = self._get_file_path(key)
+        final_path = self._get_file_path(key)
+        temp_path = final_path.with_suffix('.tmp')
+
         try:
             # Prepare metadata
             redis_metadata = RedisMetadata(len(memory_obj.byte_array),
@@ -116,21 +118,25 @@ class FSConnector(RemoteConnector):
                                            memory_obj.get_memory_format())
 
             # Write to file (metadata + data)
-            with open(file_path, 'wb') as f:
+            with open(temp_path, 'wb') as f:
                 f.write(redis_metadata.serialize())
                 f.write(memory_obj.byte_array)
 
-            self.memory_allocator.ref_count_down(memory_obj)
+            # Atomically rename temp file to final destination
+            temp_path.replace(final_path)
 
         except Exception as e:
-            logger.error(f"Failed to write to file {file_path}: {str(e)}")
-            if file_path.exists():
-                file_path.unlink()  # Remove corrupted file
+            logger.error(f"Failed to write file {final_path}: {str(e)}")
+            if temp_path.exists():
+                temp_path.unlink()  # Remove corrupted file
+            raise
+        finally:
+            self.memory_allocator.ref_count_down(memory_obj)
 
     @no_type_check
     async def list(self) -> List[str]:
         """List all keys in file system"""
-        return [f.stem for f in self.base_path.glob("*.dat")]
+        return [f.stem for f in self.base_path.glob("*.data")]
 
     async def close(self):
         """Clean up resources"""
