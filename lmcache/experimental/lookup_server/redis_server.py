@@ -1,4 +1,5 @@
 import inspect
+import time
 from typing import List, Optional, Tuple
 
 import redis
@@ -31,18 +32,30 @@ class RedisLookupServer(LookupServerInterface):
         logger.info(f"Connected to Redis lookup server at {host}:{port}")
         #decode_responses=False)
 
+    def _get_indexing_key(self, key: CacheEngineKey):
+        return f"{key.model_name}@{key.chunk_hash}"
+
+    def _get_indexing_metadata(self, key: CacheEngineKey):
+        return f"{key.fmt}@{key.world_size}@{key.worker_id}@{time.time()}"
+
+    def _extract_cache_keys_componenets(self, indexing_metadata: str):
+        return indexing_metadata.split("@")[:-1]
+
     def lookup(self, key: CacheEngineKey) -> Optional[Tuple[str, int]]:
         """
         Perform lookup in the lookup server.
         """
         logger.debug("Call to lookup in lookup server")
-        url = self.connection.get(key.to_string())
-        logger.debug(f"KV cache lives on {url}")
-        assert not inspect.isawaitable(url)
-        if url is None:
+        result = self.connection.hgetall(self._get_indexing_key(key))
+        logger.debug(f"KV cache lives on {result}")
+        if not result:
             return None
-        host, port = url.split(":")
-        return host, int(port)
+        comps = self._extract_cache_keys_componenets(self._get_indexing_metadata(key))
+        for md_key, md_value in result.items():
+            if comps == self._extract_cache_keys_componenets(md_value):
+                url = md_key
+                host, port = url.split(":")
+                return host, int(port)
 
     def insert(self, key: CacheEngineKey):
         """
@@ -50,14 +63,16 @@ class RedisLookupServer(LookupServerInterface):
         """
         assert self.distributed_url is not None
         logger.debug("Call to insert in lookup server")
-        self.connection.set(key.to_string(), self.distributed_url)
+        self.connection.hset(self._get_indexing_key(key),
+                             self.distributed_url,
+                             self._get_indexing_metadata(key))
 
     def remove(self, key: CacheEngineKey):
         """
         Perform remove in the lookup server.
         """
         logger.debug("Call to remove in lookup server")
-        self.connection.delete(key.to_string())
+        self.connection.hdel(self._get_indexing_key(key), self.distributed_url)
 
     def batched_remove(self, keys: List[CacheEngineKey]):
         """
@@ -67,5 +82,7 @@ class RedisLookupServer(LookupServerInterface):
         if not keys:
             return
         # TODO(Jiayi): We might need to cache the `str_keys` for performance.
-        str_keys = [key.to_string() for key in keys]
-        self.connection.delete(*str_keys)
+        pipe = self.connection.pipeline()
+        for key in keys:
+            pipe.hdel(self._get_indexing_key(key), self.distributed_url)
+        pipe.execute()
