@@ -102,7 +102,7 @@ class LMCacheEngine:
                 config, metadata, self.memory_allocator, self.lmcache_worker,
                 self.lookup_server)  # type: ignore[assignment]
 
-        if self.enable_p2p and False:
+        if self.enable_p2p:
             self.distributed_loop = asyncio.get_event_loop()
             assert self.lookup_server is not None
             assert isinstance(self.storage_manager, StorageManager)
@@ -300,7 +300,7 @@ class LMCacheEngine:
             memory_obj = self.storage_manager.get(key)
 
             if memory_obj is None:
-                if self.enable_p2p and False:
+                if self.enable_p2p:
                     future_memory_obj = asyncio.run_coroutine_threadsafe(
                         self.distributed_server.issue_get(key),
                         self.distributed_loop)
@@ -362,10 +362,32 @@ class LMCacheEngine:
         :return: An int indicating how many prefix tokens are cached.
         """
         end = 0
+        search_local = True  # we always lookup local storage_manager first
+        # secondary lookup on p2p (via lookup_server) if enabled
+        search_p2p = (self.enable_p2p
+                      and (search_range is None or "p2p" in search_range))
+
         for start, end, key in self.token_database.process_tokens(tokens):
             assert isinstance(key, CacheEngineKey)
-            if not self.storage_manager.contains(key, search_range):
-                return start
+            if search_local:
+                if self.storage_manager.contains(key, search_range):
+                    # found in storage manager, no need to search p2p
+                    continue
+                else:
+                    # key not found in storage_manager
+                    # search only p2p from now on
+                    search_local = False
+            if search_p2p:
+                assert self.lookup_server is not None
+                if self.lookup_server.lookup(key):
+                    # found in p2p
+                    # continue loop to ensure a maximal prefix match
+                    continue
+            # not found in both storage_manager and p2p,
+            # return start, which equals last iteration's end
+            return start
+
+        # all tokens where found, return the maximal end
         return end
 
     def clear(
@@ -390,7 +412,7 @@ class LMCacheEngine:
     def close(self) -> None:
         """Close the cache engine and free all the resources"""
 
-        if self.enable_p2p and False:
+        if self.enable_p2p:
             self.distributed_server.close()
 
         if self.lmcache_worker is not None:
