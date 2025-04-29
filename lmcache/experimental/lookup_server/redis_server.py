@@ -50,12 +50,15 @@ class RedisLookupServer(LookupServerInterface):
         logger.debug(f"KV cache lives on {result}")
         if not result:
             return None
-        comps = self._extract_cache_keys_componenets(self._get_indexing_metadata(key))
+        comps = self._extract_cache_keys_componenets(
+            self._get_indexing_metadata(key))
+        assert not inspect.isawaitable(result)
         for md_key, md_value in result.items():
             if comps == self._extract_cache_keys_componenets(md_value):
                 url = md_key
                 host, port = url.split(":")
                 return host, int(port)
+        return None
 
     def insert(self, key: CacheEngineKey):
         """
@@ -63,8 +66,7 @@ class RedisLookupServer(LookupServerInterface):
         """
         assert self.distributed_url is not None
         logger.debug("Call to insert in lookup server")
-        self.connection.hset(self._get_indexing_key(key),
-                             self.distributed_url,
+        self.connection.hset(self._get_indexing_key(key), self.distributed_url,
                              self._get_indexing_metadata(key))
 
     def remove(self, key: CacheEngineKey):
@@ -72,6 +74,7 @@ class RedisLookupServer(LookupServerInterface):
         Perform remove in the lookup server.
         """
         logger.debug("Call to remove in lookup server")
+        assert self.distributed_url is not None
         self.connection.hdel(self._get_indexing_key(key), self.distributed_url)
 
     def batched_remove(self, keys: List[CacheEngineKey]):
@@ -83,6 +86,7 @@ class RedisLookupServer(LookupServerInterface):
             return
         # TODO(Jiayi): We might need to cache the `str_keys` for performance.
         pipe = self.connection.pipeline()
+        assert self.distributed_url is not None
         for key in keys:
             pipe.hdel(self._get_indexing_key(key), self.distributed_url)
         pipe.execute()
