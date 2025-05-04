@@ -305,7 +305,15 @@ class LMCacheEngine:
                     future_memory_obj = asyncio.run_coroutine_threadsafe(
                         self.distributed_server.issue_get(key),
                         self.distributed_loop)
-                    memory_obj = future_memory_obj.result()
+                    try:
+                        memory_obj = future_memory_obj.result(1)
+                    except TimeoutError:
+                        logger.warning(
+                            "Timeout while trying to read from peer")
+                        future_memory_obj.cancel()
+                    except Exception as exc:
+                        logger.warning(
+                            f"Got exception while reading from peer: {exc}")
                 if memory_obj is None:
                     break
 
