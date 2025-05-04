@@ -42,3 +42,10 @@ class LookupServerInterface(metaclass=abc.ABCMeta):
         Perform batched remove in the lookup server.
         """
         raise NotImplementedError
+
+    @abc.abstractmethod
+    def close(self):
+        """
+        Close lookup server.
+        """
+        raise NotImplementedError

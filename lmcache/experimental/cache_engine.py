@@ -423,6 +423,8 @@ class LMCacheEngine:
 
         if self.enable_p2p:
             self.distributed_server.close()
+        if self.lookup_server is not None:
+            self.lookup_server.close()
 
         if self.lmcache_worker is not None:
             self.lmcache_worker.close()
