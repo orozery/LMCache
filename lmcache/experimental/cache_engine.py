@@ -77,14 +77,13 @@ class LMCacheEngine:
         self.token_database = token_database
         self.gpu_connector = gpu_connector
 
-        self.enable_p2p = (config.enable_p2p and config.distributed_url
-                           and ":" in config.distributed_url)
+        self.enable_p2p = config.enable_p2p
 
         # NOTE: Unix systems use fork by default
         multiprocessing.set_start_method('spawn', force=True)
 
         self.lookup_server: Optional[LookupServerInterface] = None
-        if config.enable_p2p:
+        if config.lookup_url is not None:
             self.lookup_server = RedisLookupServer(config)
 
         # avoid circular import

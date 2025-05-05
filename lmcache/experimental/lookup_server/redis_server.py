@@ -15,9 +15,6 @@ from lmcache.utils import CacheEngineKey
 
 logger = init_logger(__name__)
 
-BATCH_SIZE = 10
-BATCH_TIMEOUT = 0.1  # time in seconds before closing-up batch
-
 
 class _WorkPriority(IntEnum):
     LOOKUP = 0  # Highest priority
@@ -45,15 +42,19 @@ class RedisLookupServer(LookupServerInterface):
         self.host = host
         self.port = int(port)
 
+        self.batch_timeout = config.lookup_batch_timeout
+        self.batch_size = config.lookup_batch_size
+        self.lookup_timeout = config.lookup_timeout
+
         self.connection = redis.Redis(host=self.host,
                                       port=self.port,
-                                      socket_timeout=1,
+                                      socket_timeout=self.lookup_timeout,
                                       decode_responses=True)
         logger.info(f"Connected to Redis lookup server at {host}:{port}")
         #decode_responses=False)
 
         self.queue: asyncio.PriorityQueue[tuple[_WorkPriority, _WorkItem]] = (
-            asyncio.PriorityQueue())
+            asyncio.PriorityQueue(config.lookup_queue_size))
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
@@ -72,9 +73,9 @@ class RedisLookupServer(LookupServerInterface):
         if item.op == _Op.LOOKUP:
             timeout = 0.0  # lookups should not wait
         else:
-            timeout = BATCH_TIMEOUT
+            timeout = self.batch_timeout
 
-        for _ in range(BATCH_SIZE - 1):
+        for _ in range(self.batch_size - 1):
             try:
                 _, item = await asyncio.wait_for(self.queue.get(),
                                                  timeout=timeout)
@@ -158,7 +159,7 @@ class RedisLookupServer(LookupServerInterface):
 
         result = None
         try:
-            result = cfut.result(1)
+            result = cfut.result(self.lookup_timeout)
         except TimeoutError:
             logger.warning("Timeout while waiting for lookup")
             fut.cancel()
