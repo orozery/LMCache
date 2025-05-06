@@ -115,8 +115,11 @@ class RedisLookupServer(LookupServerInterface):
                     self._add_to_pipeline(pipe, item)
                     items.append(item)
                 logger.debug(f"Sending a batch of {len(items)} requests")
+                t0 = time.perf_counter()
                 results = pipe.execute(raise_on_error=False)
+                t1 = time.perf_counter()
                 logger.debug("Batch results are ready")
+                logger.debug(f"redis execute time: {t1-t0:.6f}")
 
             for item, result in zip(items, results):
                 if isinstance(result, Exception):
@@ -185,11 +188,19 @@ class RedisLookupServer(LookupServerInterface):
         Perform insert in the lookup server.
         """
         logger.debug("Call to insert in lookup server")
+        t0 = time.perf_counter()
         fut = self.loop.create_future()
+        t1 = time.perf_counter()
         item = _WorkItem(key, _Op.INSERT, fut)
+        t2 = time.perf_counter()
         fut.add_done_callback(_log_result)
+        t3 = time.perf_counter()
         asyncio.run_coroutine_threadsafe(
             self.queue.put((_WorkPriority.UPDATE, item)), self.loop)
+        t4 = time.perf_counter()
+        logger.debug(
+            f"total insert time: {t4 - t0:.6f}, {t1 - t0:.6f}, {t2 - t1:.6f}, {t3 - t2:.6f}, {t4 - t3:.6f}")
+        return t0, t1, t2, t3, t4
 
     def remove(self, key: CacheEngineKey):
         """

@@ -218,6 +218,7 @@ class LMCacheEngine:
         :raises: ValueError if the number of Falses in the mask is not a 
             multiple of the chunk size.
         """
+        t0 = time.perf_counter()
         # FIXME(ApostaC): A HACK for distributed storage manager
         if self.use_distributed_storage_manager:
             self.store_distributed(tokens, mask, **kwargs)
@@ -227,13 +228,31 @@ class LMCacheEngine:
             num_stored_tokens = torch.sum(mask).item()
         else:
             num_stored_tokens = len(tokens)
+        t0b = time.perf_counter()
         monitor_req_id = self.stats_monitor.on_store_request(num_stored_tokens)
+
+        t1 = time.perf_counter()
+
+        d0 = 0.0
+        d1 = 0.0
+        d2 = 0.0
+        d3 = 0.0
+        d4 = 0.0
+        d5 = 0.0
+        t7 = time.perf_counter()
 
         for start, end, key in self.token_database.process_tokens(
                 tokens, mask):
+            t2 = time.perf_counter()
+            d0 += t2-t7
             assert isinstance(key, CacheEngineKey)
             if self.storage_manager.contains(key):
+                t3 = time.perf_counter()
+                d1 += t3-t2
                 continue
+            t3 = time.perf_counter()
+            d1 += t3 - t2
+
             # Allocate the memory object
             num_tokens = end - start
             kv_shape = self.gpu_connector.get_shape(num_tokens)
@@ -243,18 +262,32 @@ class LMCacheEngine:
                 logger.warning("Failed to allocate memory for the KV cache.\n"
                                "The KV cache will not be stored.")
                 break
+            t4 = time.perf_counter()
+            d2 += t4 - t3
 
             self.gpu_connector.from_gpu(memory_obj, start, end, **kwargs)
+            t5 = time.perf_counter()
+            d3 += t5 - t4
             self.storage_manager.put(key, memory_obj)
+            t6 = time.perf_counter()
+            d4 += t6 - t5
 
             # Update lookup server
             if self.lookup_server is not None:
-                self.lookup_server.insert(key)
+                a0,a1,a2,a3,a4 = self.lookup_server.insert(key)
+            t7 = time.perf_counter()
+            d5 += t7 - t6
 
+        t2 = time.perf_counter()
         self.stats_monitor.on_store_finished(monitor_req_id)
+        t3 = time.perf_counter()
 
         logger.debug(f"Stored {num_stored_tokens} "
                      f"out of total {len(tokens)} tokens")
+
+        logger.warning(f"total store time: {t3-t0:.6f}, {t0b-t0:.6f}, {t1-t0b:.6f}, {d0:.6f}, {d1:.6f}, {d2:.6f}, {d3:.6f}, {d4:.6f}, {d5:.6f}, {t3-t2:.6f}")
+        logger.warning(
+            f"insert time: {a4 - a0:.6f}, {a1 - a0:.6f}, {a2 - a1:.6f}, {a3 - a2:.6f}, {a4 - a3:.6f}")
 
     @_lmcache_nvtx_annotate
     @torch.inference_mode()
@@ -283,6 +316,7 @@ class LMCacheEngine:
         :raises: ValueError if the number of Falses in the mask is not a 
             multiple of the chunk size.
         """
+        t0 = time.perf_counter()
         if mask is not None:
             num_required_tokens = torch.sum(mask).item()
         else:
@@ -291,13 +325,22 @@ class LMCacheEngine:
             num_required_tokens)
 
         ret_mask = torch.zeros_like(tokens, dtype=torch.bool, device="cpu")
+        t1 = time.perf_counter()
+        d0 = 0.0
+        d1 = 0.0
+        d2 = 0.0
+        d3 = 0.0
+        t5 = time.perf_counter()
         for start, end, key in self.token_database.process_tokens(
                 tokens, mask):
-
+            t2 = time.perf_counter()
+            d0 += t2 - t5
             assert isinstance(key, CacheEngineKey)
 
             # Get the memory object from the storage backend
             memory_obj = self.storage_manager.get(key)
+            t3 = time.perf_counter()
+            d1 += t3 - t2
 
             if memory_obj is None:
                 if self.enable_p2p:
@@ -323,7 +366,11 @@ class LMCacheEngine:
             # For example, disk->gpu is faster than disk->cpu->gpu.
             # RDMA is another example.
             self.gpu_connector.to_gpu(memory_obj, start, end, **kwargs)
+            t4 = time.perf_counter()
+            d2 += t4 - t3
             self.memory_allocator.ref_count_down(memory_obj)
+            t5 = time.perf_counter()
+            d3 += t5 - t4
 
             # NOTE (ApostaC): This is only for the current implementation:
             # When the object is retrieved back to vLLM, the storage backend
@@ -331,12 +378,16 @@ class LMCacheEngine:
             if isinstance(self.storage_manager, DistributedStorageManager):
                 self.storage_manager.remove(key)
 
+        t2 = time.perf_counter()
         retrieved_tokens = torch.sum(ret_mask)
         self.stats_monitor.on_retrieve_finished(monitor_req_id,
                                                 torch.sum(ret_mask))
+        t3 = time.perf_counter()
         logger.debug(f"Retrieved {retrieved_tokens} "
                      f"out of {num_required_tokens} "
                      f"out of total {len(tokens)} tokens")
+        logger.debug(
+            f"total retrieve time: {t3 - t0:.6f}, {t1 - t0:.6f}, {d0:.6f}, {d1:.6f}, {d2:.6f}, {d3:.6f}, {t3 - t2:.6f}")
         return ret_mask
 
     def prefetch(
@@ -369,6 +420,7 @@ class LMCacheEngine:
 
         :return: An int indicating how many prefix tokens are cached.
         """
+        t0 = time.perf_counter()
         end = 0
         search_local = True  # we always lookup local storage_manager first
         # secondary lookup on p2p (via lookup_server) if enabled
@@ -393,9 +445,13 @@ class LMCacheEngine:
                     continue
             # not found in both storage_manager and p2p,
             # return start, which equals last iteration's end
+            logger.debug(
+                f"total lookup time: {time.perf_counter() - t0:.6f}")
             return start
 
         # all tokens where found, return the maximal end
+        logger.debug(
+            f"total lookup time: {time.perf_counter() - t0:.6f}")
         return end
 
     def clear(
