@@ -18,7 +18,7 @@ from typing import List, Optional, no_type_check
 
 from lmcache.experimental.memory_management import (MemoryAllocatorInterface,
                                                     MemoryObj)
-from lmcache.experimental.protocol import RedisMetadata
+from lmcache.experimental.protocol import RemoteMetadata
 from lmcache.experimental.storage_backend.connector.base_connector import \
     RemoteConnector
 from lmcache.logging import init_logger
@@ -76,7 +76,7 @@ class FSConnector(RemoteConnector):
                 data = f.read()
 
             # Split metadata and actual data
-            redis_metadata = RedisMetadata.deserialize(
+            redis_metadata = RemoteMetadata.deserialize(
                 memoryview(data[:METADATA_BYTES_LEN]))
             kv_bytes = data[METADATA_BYTES_LEN:METADATA_BYTES_LEN +
                             redis_metadata.length]
@@ -112,7 +112,7 @@ class FSConnector(RemoteConnector):
 
         try:
             # Prepare metadata
-            redis_metadata = RedisMetadata(len(memory_obj.byte_array),
+            redis_metadata = RemoteMetadata(len(memory_obj.byte_array),
                                            memory_obj.get_shape(),
                                            memory_obj.get_dtype(),
                                            memory_obj.get_memory_format())
