@@ -113,9 +113,9 @@ class FSConnector(RemoteConnector):
         try:
             # Prepare metadata
             metadata = RemoteMetadata(len(memory_obj.byte_array),
-                                           memory_obj.get_shape(),
-                                           memory_obj.get_dtype(),
-                                           memory_obj.get_memory_format())
+                                      memory_obj.get_shape(),
+                                      memory_obj.get_dtype(),
+                                      memory_obj.get_memory_format())
 
             # Write to file (metadata + data)
             with open(temp_path, 'wb') as f:
