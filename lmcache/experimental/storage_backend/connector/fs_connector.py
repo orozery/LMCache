@@ -76,16 +76,16 @@ class FSConnector(RemoteConnector):
                 data = f.read()
 
             # Split metadata and actual data
-            redis_metadata = RemoteMetadata.deserialize(
+            metadata = RemoteMetadata.deserialize(
                 memoryview(data[:METADATA_BYTES_LEN]))
             kv_bytes = data[METADATA_BYTES_LEN:METADATA_BYTES_LEN +
-                            redis_metadata.length]
+                            metadata.length]
 
             # Allocate memory and copy data
             memory_obj = self.memory_allocator.allocate(
-                redis_metadata.shape,
-                redis_metadata.dtype,
-                redis_metadata.fmt,
+                metadata.shape,
+                metadata.dtype,
+                metadata.fmt,
             )
             if memory_obj is None:
                 logger.warning("Failed to allocate memory during file read")
@@ -97,7 +97,7 @@ class FSConnector(RemoteConnector):
                     view = view.cast("B")
             else:
                 view = memoryview(memory_obj.byte_array)
-            view[:redis_metadata.length] = kv_bytes
+            view[:metadata.length] = kv_bytes
 
             return memory_obj
 
@@ -112,14 +112,14 @@ class FSConnector(RemoteConnector):
 
         try:
             # Prepare metadata
-            redis_metadata = RemoteMetadata(len(memory_obj.byte_array),
+            metadata = RemoteMetadata(len(memory_obj.byte_array),
                                            memory_obj.get_shape(),
                                            memory_obj.get_dtype(),
                                            memory_obj.get_memory_format())
 
             # Write to file (metadata + data)
             with open(temp_path, 'wb') as f:
-                f.write(redis_metadata.serialize())
+                f.write(metadata.serialize())
                 f.write(memory_obj.byte_array)
 
             # Atomically rename temp file to final destination
