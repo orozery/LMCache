@@ -59,7 +59,7 @@ class LMCacheEngineConfig:
     controller_url: Optional[str] = None
     # lmcache worker url
     # NOTE: port number will add `worker_id`
-    lmcache_worker_url: Optional[str] = None
+    lmcache_worker_port: Optional[int] = None
 
     # (Optional) Nixl configurations
     # whether to enable Nixl
