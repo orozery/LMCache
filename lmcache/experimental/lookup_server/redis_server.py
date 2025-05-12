@@ -141,9 +141,6 @@ class RedisLookupServer(LookupServerInterface):
     def _get_indexing_metadata(self, key: CacheEngineKey) -> str:
         return f"{key.fmt}@{key.world_size}@{key.worker_id}@{time.time()}"
 
-    def _extract_cache_keys_componenets(self, metadata: str) -> List[str]:
-        return metadata.split("@")[:-1]
-
     def lookup(self, key: CacheEngineKey) -> Optional[Tuple[str, int]]:
         """
         Perform lookup in the lookup server.
@@ -170,14 +167,11 @@ class RedisLookupServer(LookupServerInterface):
             return None
 
         logger.debug(f"KV cache lives on {result}")
-        comps = self._extract_cache_keys_componenets(
-            self._get_indexing_metadata(key))
 
         for md_key, md_value in result.items():
-            if comps == self._extract_cache_keys_componenets(md_value):
-                url = md_key
-                host, port = url.split(":")
-                return host, int(port)
+            url = md_key
+            host, port = url.split(":")
+            return host, int(port)
         return None
 
     def insert(self, key: CacheEngineKey):
